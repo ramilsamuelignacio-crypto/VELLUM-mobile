@@ -1,0 +1,8 @@
+{
+  "name": "Vellum",
+  "description": "A real-time collaborative sketching studio for drawing and sharing artwork live.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

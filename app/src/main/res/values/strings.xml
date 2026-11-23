@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Vellum</string>
+    <string name="app_subtitle">Real-Time Sketching Studio</string>
+    <string name="enter_studio">Enter Studio</string>
+    <string name="action_guide">Guide</string>
+    <string name="action_new_room">New Room</string>
+    <string name="action_export_png">Export PNG</string>
+    <string name="action_share_room">Room Code &amp; QR</string>
+    <string name="action_share_short">Share</string>
+    <string name="action_undo">Undo</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_layers">Layers</string>
+    <string name="action_tools">Tools</string>
+    <string name="action_canvas">Canvas</string>
+    <string name="action_draw">Draw</string>
+    <string name="action_pan">Pan</string>
+    <string name="action_add_layer">Add Layer</string>
+    <string name="action_pin_reference">Reference</string>
+    <string name="action_recenter_symmetry">Recenter Axis</string>
+    <string name="room_join_error">Enter a valid room code (at least 2 letters or numbers) or paste a room link.</string>
+</resources>
