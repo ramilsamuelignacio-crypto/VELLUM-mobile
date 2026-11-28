@@ -37,6 +37,60 @@ object VellumColors {
         0xFF2563EB.toInt(), // Cobalt
         0xFF7C3AED.toInt()  // Violet
     )
+
+    data class PaletteGroup(
+        val name: String,
+        val colors: List<Int>
+    )
+
+    val PaletteGroups: List<PaletteGroup> = listOf(
+        PaletteGroup(
+            name = "Inks & Neutrals",
+            colors = listOf(
+                0xFF18181B.toInt(), // Charcoal Ink
+                0xFF3F3F46.toInt(), // Graphite
+                0xFF71717A.toInt(), // Warm Slate
+                0xFF78716C.toInt(), // Stone
+                0xFFD4D4D8.toInt(), // Silver Mist
+                0xFFFFFFFF.toInt()  // Paper Highlight White
+            )
+        ),
+        PaletteGroup(
+            name = "Warm Pigments",
+            colors = listOf(
+                0xFFDC2626.toInt(), // Vermilion
+                0xFFF43F5E.toInt(), // Rose Coral
+                0xFFEA580C.toInt(), // Burnt Orange
+                0xFFD97706.toInt(), // Ochre
+                0xFFEAB308.toInt(), // Marigold
+                0xFFDB2777.toInt()  // Magenta
+            )
+        ),
+        PaletteGroup(
+            name = "Earth & Botanical",
+            colors = listOf(
+                0xFF92400E.toInt(), // Raw Umber
+                0xFF65A30D.toInt(), // Moss
+                0xFF16A34A.toInt(), // Leaf Green
+                0xFF059669.toInt(), // Viridian
+                0xFF0D9488.toInt(), // Deep Teal
+                0xFF06B6D4.toInt()  // Aqua
+            )
+        ),
+        PaletteGroup(
+            name = "Sky & Violet",
+            colors = listOf(
+                0xFF0284C7.toInt(), // Cerulean
+                0xFF2563EB.toInt(), // Cobalt
+                0xFF4F46E5.toInt(), // Indigo
+                0xFF7C3AED.toInt(), // Violet
+                0xFF9333EA.toInt(), // Plum
+                0xFFA855F7.toInt()  // Lavender Ink
+            )
+        )
+    )
+
+    val ExtendedPalette: List<Int> = PaletteGroups.flatMap { it.colors }
 }
 
 private val VellumLightColorScheme = lightColorScheme(

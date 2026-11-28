@@ -24,16 +24,29 @@ enum class GuideMode(val label: String) {
     RULER("Ruler")
 }
 
-enum class BrushKind(val id: String, val label: String, val shortLabel: String) {
-    HARD_ROUND("hard-round", "Hard Round", "Ink"),
-    HB_PENCIL("hb-pencil", "HB Pencil", "HB"),
-    SOFT_AIRBRUSH("soft-airbrush", "Soft Airbrush", "Air");
+enum class BrushKind(
+    val id: String,
+    val label: String,
+    val shortLabel: String,
+    val description: String
+) {
+    HARD_ROUND("hard-round", "Hard Round", "Ink", "Crisp smooth pressure-sensitive ink"),
+    HB_PENCIL("hb-pencil", "HB Pencil", "HB", "Fine graphite grain with paper tooth"),
+    CALLIGRAPHY("calligraphy", "Calligraphy", "Callig", "Angled broad nib for thick & thin strokes"),
+    CHISEL_MARKER("chisel-marker", "Chisel Marker", "Marker", "Semi-translucent felt tip for layered washes"),
+    CHARCOAL("charcoal", "Charcoal", "Char", "Rich broken-edge compressed stick texture"),
+    WATERCOLOR("watercolor", "Watercolor", "Water", "Soft pigment wash with subtle wet edge"),
+    SOFT_AIRBRUSH("soft-airbrush", "Soft Airbrush", "Air", "Feathered radial mist for soft shading");
 
     companion object {
         fun fromId(id: String): BrushKind {
             val normalized = id.trim().lowercase()
             return when (normalized) {
                 "hb-pencil", "pencil" -> HB_PENCIL
+                "calligraphy", "fountain", "nib" -> CALLIGRAPHY
+                "chisel-marker", "marker", "felt" -> CHISEL_MARKER
+                "charcoal", "chalk" -> CHARCOAL
+                "watercolor", "wash", "aquarelle" -> WATERCOLOR
                 "soft-airbrush", "airbrush" -> SOFT_AIRBRUSH
                 else -> HARD_ROUND
             }

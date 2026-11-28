@@ -138,8 +138,8 @@ object StrokeMath {
     fun screenToWorld(screen: SketchPoint, pan: SketchPoint, zoom: Float): SketchPoint {
         val safeZoom = if (zoom > 0f) zoom else 1f
         return SketchPoint(
-            x = round(((screen.x - pan.x) / safeZoom) * 10f) / 10f,
-            y = round(((screen.y - pan.y) / safeZoom) * 10f) / 10f
+            x = round(((screen.x - pan.x) / safeZoom) * 100f) / 100f,
+            y = round(((screen.y - pan.y) / safeZoom) * 100f) / 100f
         )
     }
 
@@ -191,8 +191,8 @@ object StrokeMath {
         val f = clamp(factor, 0f, 0.9f)
         val alpha = 1f - f
         return raw.copy(
-            x = round((previous.x + (raw.x - previous.x) * alpha) * 10f) / 10f,
-            y = round((previous.y + (raw.y - previous.y) * alpha) * 10f) / 10f
+            x = round((previous.x + (raw.x - previous.x) * alpha) * 100f) / 100f,
+            y = round((previous.y + (raw.y - previous.y) * alpha) * 100f) / 100f
         )
     }
 

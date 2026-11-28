@@ -57,7 +57,8 @@ fun TouchQuickBar(
     onSelectColor: (Int) -> Unit,
     strokeSize: Float,
     onChangeSize: (Float) -> Unit,
-    onOpenToolsSheet: () -> Unit,
+    brushOpacity: Float,
+    onOpenBrushSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -158,26 +159,34 @@ fun TouchQuickBar(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                     modifier = Modifier
                         .height(36.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(VellumColors.HoverSurface)
-                        .clickable(onClick = onOpenToolsSheet)
-                        .padding(horizontal = 8.dp)
+                        .background(VellumColors.CobaltTint)
+                        .border(1.dp, VellumColors.CobaltBorder, RoundedCornerShape(8.dp))
+                        .clickable(onClick = onOpenBrushSettings)
+                        .padding(horizontal = 9.dp)
                         .testTag("quick_brush_settings")
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(Color(colorArgb).copy(alpha = brushOpacity))
+                            .border(1.dp, VellumColors.HairlineBorder, CircleShape)
+                    )
                     Text(
-                        text = "${strokeSize.roundToInt()}px",
+                        text = "${strokeSize.roundToInt()}px · ${(brushOpacity * 100f).roundToInt()}%",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = VellumColors.InkCharcoal
+                        fontWeight = FontWeight.SemiBold,
+                        color = VellumColors.CobaltBlue
                     )
                     Icon(
                         imageVector = Icons.Filled.Tune,
                         contentDescription = "Open brush settings",
-                        tint = VellumColors.SlateSecondary,
+                        tint = VellumColors.CobaltBlue,
                         modifier = Modifier.size(13.dp)
                     )
                 }
@@ -188,7 +197,7 @@ fun TouchQuickBar(
                         .size(width = 32.dp, height = 36.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(VellumColors.Subsurface)
-                        .clickable { onChangeSize((strokeSize + 2f).coerceAtMost(32f)) }
+                        .clickable { onChangeSize((strokeSize + 2f).coerceAtMost(48f)) }
                         .testTag("quick_size_increase")
                 ) {
                     Text("+", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = VellumColors.InkCharcoal)

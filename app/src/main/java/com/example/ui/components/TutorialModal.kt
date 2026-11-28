@@ -95,7 +95,7 @@ private val TUTORIAL_STEPS = listOf(
         highlights = listOf(
             TutorialHighlight(
                 "Pinch & Pan Anytime",
-                "Use two fingers to pinch-zoom (25% – 400%) and pan, or toggle Pan mode in the bottom control bar."
+                "Use two fingers to pinch-zoom (25% – 800%) and pan, or toggle Pan mode in the bottom control bar."
             ),
             TutorialHighlight(
                 "Pressure & Stabilization",
@@ -409,7 +409,7 @@ private fun TutorialStepVisual(stepId: String) {
                     }
                     Column {
                         Text("2-Finger Pinch & Pan", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = VellumColors.InkCharcoal)
-                        Text("Zoom smoothly 25% – 400%", fontSize = 11.sp, color = VellumColors.SlateSecondary)
+                        Text("Zoom smoothly 25% – 800%", fontSize = 11.sp, color = VellumColors.SlateSecondary)
                     }
                 }
             }

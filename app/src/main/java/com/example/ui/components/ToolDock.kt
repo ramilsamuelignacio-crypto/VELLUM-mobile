@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
@@ -38,6 +39,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +59,8 @@ fun ToolDock(
     onOpenCustomColor: () -> Unit,
     strokeSize: Float,
     onChangeSize: (Float) -> Unit,
+    brushOpacity: Float,
+    onOpenBrushSettings: () -> Unit,
     stabilization: Float,
     onChangeStabilization: (Float) -> Unit,
     pressureEnabled: Boolean,
@@ -175,6 +179,47 @@ fun ToolDock(
 
                 HorizontalDivider(color = VellumColors.HairlineBorder, modifier = Modifier.padding(horizontal = 6.dp))
 
+                // Brush Settings Menu Trigger (Size, Opacity, Studio Palette)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(VellumColors.CobaltTint)
+                        .border(1.dp, VellumColors.CobaltBorder, RoundedCornerShape(10.dp))
+                        .clickable(onClick = onOpenBrushSettings)
+                        .padding(vertical = 6.dp, horizontal = 4.dp)
+                        .testTag("dock_brush_settings")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color(colorArgb).copy(alpha = brushOpacity))
+                                .border(1.dp, VellumColors.HairlineBorder, CircleShape)
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.Tune,
+                            contentDescription = "Open brush settings",
+                            tint = VellumColors.CobaltBlue,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                    Text(
+                        text = "${strokeSize.roundToInt()}px·${(brushOpacity * 100f).roundToInt()}%",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = VellumColors.CobaltBlue,
+                        maxLines = 1
+                    )
+                }
+
                 // Stroke size
                 Text(
                     text = "${strokeSize.roundToInt()}px",
@@ -185,7 +230,7 @@ fun ToolDock(
                 Slider(
                     value = strokeSize,
                     onValueChange = onChangeSize,
-                    valueRange = 1f..32f,
+                    valueRange = 1f..48f,
                     colors = SliderDefaults.colors(
                         thumbColor = VellumColors.CobaltBlue,
                         activeTrackColor = VellumColors.CobaltBlue
@@ -237,9 +282,14 @@ fun ToolDock(
                             .padding(vertical = 4.dp)
                             .testTag("dock_brush_${brush.id}")
                     ) {
+                        val previewInk = when {
+                            isActive -> android.graphics.Color.WHITE
+                            Color(colorArgb).luminance() > 0.85f -> 0xFF18181B.toInt()
+                            else -> colorArgb
+                        }
                         BrushPreviewCanvas(
                             brushId = brush.id,
-                            colorArgb = if (isActive) android.graphics.Color.WHITE else colorArgb,
+                            colorArgb = previewInk,
                             width = 44.dp,
                             height = 18.dp
                         )

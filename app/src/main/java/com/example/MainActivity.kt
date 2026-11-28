@@ -35,6 +35,7 @@ import com.example.math.RoomUtils
 import com.example.theme.VellumColors
 import com.example.theme.VellumTheme
 import com.example.ui.SketchViewModel
+import com.example.ui.components.BrushSettingsMenu
 import com.example.ui.components.ColorPickerDialog
 import com.example.ui.components.LayerPanel
 import com.example.ui.components.ReferenceOverlay
@@ -124,6 +125,12 @@ fun VellumStudioApp(
     }
 
     // Handle Back navigation cleanly for open sheets/modals
+    BackHandler(enabled = uiState.showCustomColorDialog) {
+        viewModel.setShowCustomColorDialog(false)
+    }
+    BackHandler(enabled = uiState.showBrushSettingsMenu) {
+        viewModel.setShowBrushSettingsMenu(false)
+    }
     BackHandler(enabled = uiState.activeTouchSheet != null) {
         viewModel.closeTouchSheet()
     }
@@ -170,7 +177,8 @@ fun VellumStudioApp(
                         onSelectColor = viewModel::selectColor,
                         strokeSize = uiState.strokeSize,
                         onChangeSize = viewModel::setStrokeSize,
-                        onOpenToolsSheet = viewModel::openToolsSheet
+                        brushOpacity = uiState.brushOpacity,
+                        onOpenBrushSettings = { viewModel.setShowBrushSettingsMenu(true) }
                     )
                 }
 
@@ -188,6 +196,8 @@ fun VellumStudioApp(
                             onOpenCustomColor = { viewModel.setShowCustomColorDialog(true) },
                             strokeSize = uiState.strokeSize,
                             onChangeSize = viewModel::setStrokeSize,
+                            brushOpacity = uiState.brushOpacity,
+                            onOpenBrushSettings = { viewModel.setShowBrushSettingsMenu(true) },
                             stabilization = uiState.stabilization,
                             onChangeStabilization = viewModel::setStabilization,
                             pressureEnabled = uiState.pressureEnabled,
@@ -213,6 +223,7 @@ fun VellumStudioApp(
                             activeBrush = uiState.activeBrush,
                             colorArgb = uiState.colorArgb,
                             strokeSize = uiState.strokeSize,
+                            brushOpacity = uiState.brushOpacity,
                             stabilization = uiState.stabilization,
                             pressureEnabled = uiState.pressureEnabled,
                             showGrid = uiState.showGrid,
@@ -224,17 +235,14 @@ fun VellumStudioApp(
                             guideMode = uiState.guideMode,
                             touchPanMode = uiState.touchPanMode,
                             selectedStrokeId = uiState.selectedStrokeId,
-                            snapGuides = uiState.snapGuides,
                             isExpanded = isExpanded,
                             onCanvasResize = viewModel::onCanvasResize,
                             onPanZoom = viewModel::setPanAndZoom,
                             onZoomStep = viewModel::zoomStep,
                             onResetView = viewModel::resetView,
                             onSelectStroke = viewModel::setSelectedStrokeId,
-                            onSnapGuides = viewModel::setSnapGuides,
-                            onStartStroke = viewModel::startStroke,
-                            onAppendPoints = viewModel::appendPoints,
-                            onEndStroke = viewModel::endStroke,
+                            onCommitStroke = viewModel::commitStroke,
+                            onUpdateStrokePreview = viewModel::updateStrokePreview,
                             onChangeSymmetryMode = viewModel::setSymmetryMode,
                             onRecenterSymmetry = viewModel::recenterSymmetry,
                             onChangeGuideMode = viewModel::setGuideMode
@@ -285,10 +293,14 @@ fun VellumStudioApp(
                 activeTool = uiState.activeTool,
                 onSelectTool = viewModel::selectTool,
                 colorArgb = uiState.colorArgb,
+                customColors = uiState.customColors,
                 onSelectColor = viewModel::selectColor,
                 onOpenCustomColor = { viewModel.setShowCustomColorDialog(true) },
                 strokeSize = uiState.strokeSize,
                 onChangeSize = viewModel::setStrokeSize,
+                brushOpacity = uiState.brushOpacity,
+                onChangeOpacity = viewModel::setBrushOpacity,
+                onOpenBrushSettings = { viewModel.setShowBrushSettingsMenu(true) },
                 stabilization = uiState.stabilization,
                 onChangeStabilization = viewModel::setStabilization,
                 pressureEnabled = uiState.pressureEnabled,
@@ -314,6 +326,27 @@ fun VellumStudioApp(
                 onAddLayer = viewModel::addLayer,
                 onToggleLayerVisibility = viewModel::toggleLayerVisibility,
                 onMoveLayer = viewModel::moveLayer
+            )
+        }
+
+        if (uiState.showBrushSettingsMenu) {
+            BrushSettingsMenu(
+                activeTool = uiState.activeTool,
+                activeBrush = uiState.activeBrush,
+                onSelectBrush = viewModel::selectBrush,
+                strokeSize = uiState.strokeSize,
+                onChangeSize = viewModel::setStrokeSize,
+                brushOpacity = uiState.brushOpacity,
+                onChangeOpacity = viewModel::setBrushOpacity,
+                colorArgb = uiState.colorArgb,
+                customColors = uiState.customColors,
+                onSelectColor = viewModel::selectColor,
+                onOpenCustomColor = { viewModel.setShowCustomColorDialog(true) },
+                stabilization = uiState.stabilization,
+                onChangeStabilization = viewModel::setStabilization,
+                pressureEnabled = uiState.pressureEnabled,
+                onTogglePressure = viewModel::togglePressure,
+                onDismiss = { viewModel.setShowBrushSettingsMenu(false) }
             )
         }
 

@@ -1,5 +1,11 @@
 package com.example.ui.components
 
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Color as AndroidColor
+import android.graphics.Matrix
+import android.graphics.Paint as AndroidPaint
+import android.graphics.Shader
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,7 +29,10 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -39,6 +48,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke as ComposeStroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -62,12 +72,185 @@ import com.example.model.SymmetryMode
 import com.example.model.ToolType
 import com.example.theme.VellumColors
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.round
 import kotlin.math.roundToInt
 import kotlin.math.sin
+
+private class LiveStrokeHolder {
+    var activeStroke: Stroke? = null
+    val activePoints = ArrayList<SketchPoint>(256)
+    var pendingCommitStroke: Stroke? = null
+    var activeSnapGuides: SnapGuides = SnapGuides()
+    var totalMoveDist: Float = 0f
+    var isGestureNavigating: Boolean = false
+    var gesturePan: SketchPoint = SketchPoint(0f, 0f)
+    var gestureZoom: Float = 1f
+}
+
+private class CommittedCanvasCache {
+    var bitmap: Bitmap? = null
+    var canvas: android.graphics.Canvas? = null
+    var lastWidth: Int = 0
+    var lastHeight: Int = 0
+    var lastPan: SketchPoint? = null
+    var lastZoom: Float = -1f
+    var lastSymmetryCenter: SketchPoint? = null
+    var lastStrokes: List<Stroke>? = null
+    private val previewMatrix = Matrix()
+    private val previewPaint = AndroidPaint(AndroidPaint.FILTER_BITMAP_FLAG)
+
+    fun drawTransformedPreview(
+        targetCanvas: android.graphics.Canvas,
+        currentPan: SketchPoint,
+        currentZoom: Float
+    ): Boolean {
+        val bmp = bitmap ?: return false
+        val bakedZoom = lastZoom
+        val bakedPan = lastPan ?: return false
+        if (bakedZoom <= 0f || currentZoom <= 0f) return false
+        val relScale = currentZoom / bakedZoom
+        val relTx = currentPan.x - bakedPan.x * relScale
+        val relTy = currentPan.y - bakedPan.y * relScale
+        previewMatrix.reset()
+        previewMatrix.postScale(relScale, relScale)
+        previewMatrix.postTranslate(relTx, relTy)
+        targetCanvas.drawBitmap(bmp, previewMatrix, previewPaint)
+        return true
+    }
+
+    fun ensureAndBake(
+        width: Int,
+        height: Int,
+        visibleStrokes: List<Stroke>,
+        pan: SketchPoint,
+        zoom: Float,
+        symmetryCenter: SketchPoint
+    ): Bitmap? {
+        if (width <= 0 || height <= 0) return null
+
+        val sizeChanged = bitmap == null || lastWidth != width || lastHeight != height
+        if (sizeChanged) {
+            bitmap?.recycle()
+            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            canvas = android.graphics.Canvas(bitmap!!)
+            lastWidth = width
+            lastHeight = height
+            lastStrokes = null
+        }
+
+        val viewUnchanged = !sizeChanged &&
+            lastPan == pan &&
+            lastZoom == zoom &&
+            lastSymmetryCenter == symmetryCenter
+
+        val prev = lastStrokes
+        if (viewUnchanged && prev === visibleStrokes) {
+            return bitmap
+        }
+
+        val targetCanvas = canvas ?: return bitmap
+
+        val canIncrementalAppend = viewUnchanged &&
+            prev != null &&
+            visibleStrokes.size == prev.size + 1 &&
+            visibleStrokes.last().tool != ToolType.ERASER &&
+            (0 until prev.size).all { visibleStrokes[it] === prev[it] }
+
+        if (canIncrementalAppend) {
+            targetCanvas.save()
+            targetCanvas.translate(pan.x, pan.y)
+            targetCanvas.scale(zoom, zoom)
+            BrushEngine.renderBrushStrokeToCanvas(targetCanvas, visibleStrokes.last(), symmetryCenter)
+            targetCanvas.restore()
+        } else {
+            bitmap!!.eraseColor(AndroidColor.TRANSPARENT)
+            if (visibleStrokes.isNotEmpty()) {
+                targetCanvas.save()
+                targetCanvas.translate(pan.x, pan.y)
+                targetCanvas.scale(zoom, zoom)
+                for (i in visibleStrokes.indices) {
+                    BrushEngine.renderBrushStrokeToCanvas(targetCanvas, visibleStrokes[i], symmetryCenter)
+                }
+                targetCanvas.restore()
+            }
+        }
+
+        lastPan = pan
+        lastZoom = zoom
+        lastSymmetryCenter = symmetryCenter
+        lastStrokes = visibleStrokes
+        return bitmap
+    }
+
+    fun recycle() {
+        bitmap?.recycle()
+        bitmap = null
+        canvas = null
+        lastStrokes = null
+    }
+}
+
+private class DotGridBuffer {
+    var points = FloatArray(4096)
+    val paint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+        style = AndroidPaint.Style.STROKE
+        strokeCap = AndroidPaint.Cap.ROUND
+    }
+}
+
+private class PaperGrainShaderCache {
+    private var tileBitmap: Bitmap? = null
+    private var paint: AndroidPaint? = null
+    private var lastTileSize: Int = 0
+    private var lastColor: Int = 0
+
+    fun getPaint(stepPx: Float, colorArgb: Int): AndroidPaint {
+        val tileSize = (stepPx * 4f).roundToInt().coerceIn(32, 256)
+        val existing = paint
+        if (existing != null && lastTileSize == tileSize && lastColor == colorArgb) {
+            return existing
+        }
+        tileBitmap?.recycle()
+        val bmp = Bitmap.createBitmap(tileSize, tileSize, Bitmap.Config.ARGB_8888)
+        val tileCanvas = android.graphics.Canvas(bmp)
+        val dotPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+            style = AndroidPaint.Style.FILL
+            color = colorArgb
+            alpha = 8
+        }
+        val step = tileSize / 4f
+        var row = 0
+        var y = step * 0.5f
+        while (y < tileSize) {
+            var x = if (row % 2 == 0) step * 0.25f else step * 0.75f
+            while (x < tileSize) {
+                tileCanvas.drawCircle(x, y, 0.75f, dotPaint)
+                x += step
+            }
+            y += step
+            row++
+        }
+        val shader = BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+        val newPaint = AndroidPaint().apply {
+            this.shader = shader
+        }
+        tileBitmap = bmp
+        paint = newPaint
+        lastTileSize = tileSize
+        lastColor = colorArgb
+        return newPaint
+    }
+
+    fun recycle() {
+        tileBitmap?.recycle()
+        tileBitmap = null
+        paint = null
+    }
+}
 
 @Composable
 fun SketchCanvas(
@@ -79,6 +262,7 @@ fun SketchCanvas(
     activeBrush: String,
     colorArgb: Int,
     strokeSize: Float,
+    brushOpacity: Float = 1f,
     stabilization: Float,
     pressureEnabled: Boolean,
     showGrid: Boolean,
@@ -90,17 +274,14 @@ fun SketchCanvas(
     guideMode: GuideMode,
     touchPanMode: Boolean,
     selectedStrokeId: String?,
-    snapGuides: SnapGuides,
     isExpanded: Boolean,
     onCanvasResize: (width: Float, height: Float) -> Unit,
     onPanZoom: (pan: SketchPoint, zoom: Float) -> Unit,
     onZoomStep: (Float) -> Unit,
     onResetView: () -> Unit,
     onSelectStroke: (String?) -> Unit,
-    onSnapGuides: (SnapGuides) -> Unit,
-    onStartStroke: (Stroke) -> Unit,
-    onAppendPoints: (strokeId: String, points: List<SketchPoint>) -> Unit,
-    onEndStroke: (Stroke) -> Unit,
+    onCommitStroke: (Stroke) -> Unit,
+    onUpdateStrokePreview: (Stroke) -> Unit,
     onChangeSymmetryMode: (SymmetryMode) -> Unit,
     onRecenterSymmetry: () -> Unit,
     onChangeGuideMode: (GuideMode) -> Unit,
@@ -114,6 +295,7 @@ fun SketchCanvas(
     val currentBrush by rememberUpdatedState(activeBrush)
     val currentColor by rememberUpdatedState(colorArgb)
     val currentStrokeSize by rememberUpdatedState(strokeSize)
+    val currentBrushOpacity by rememberUpdatedState(brushOpacity)
     val currentStabilization by rememberUpdatedState(stabilization)
     val currentPressureEnabled by rememberUpdatedState(pressureEnabled)
     val currentZoom by rememberUpdatedState(zoom)
@@ -122,9 +304,41 @@ fun SketchCanvas(
     val currentSymmetryCenter by rememberUpdatedState(symmetryCenter)
     val currentTouchPanMode by rememberUpdatedState(touchPanMode)
 
+    val liveHolder = remember { LiveStrokeHolder() }
+    var activeDrawTick by remember { mutableIntStateOf(0) }
+    val committedCache = remember { CommittedCanvasCache() }
+    val dotGridBuffer = remember { DotGridBuffer() }
+    val paperGrainCache = remember { PaperGrainShaderCache() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            committedCache.recycle()
+            paperGrainCache.recycle()
+        }
+    }
+
+    // Pre-warm active brush stamp bitmaps before the user touches the canvas
+    LaunchedEffect(colorArgb, activeBrush) {
+        BrushEngine.getCachedPencilGrainBitmap(colorArgb, 24)
+        BrushEngine.getCachedAirbrushStampBitmap(colorArgb, 64)
+        BrushEngine.getCachedCharcoalGrainBitmap(colorArgb, 32)
+        BrushEngine.getCachedMarkerNibBitmap(colorArgb, 32, 12)
+        BrushEngine.getCachedWatercolorStampBitmap(colorArgb, 64)
+    }
+
     val visibleStrokes = remember(strokes, layers) {
         StrokeMath.getVisibleStrokesInLayerOrder(strokes, layers)
     }
+
+    // Clear pendingCommitStroke only after visibleStrokes reflects it (prevents 1-frame blink)
+    LaunchedEffect(visibleStrokes) {
+        val pending = liveHolder.pendingCommitStroke
+        if (pending != null && visibleStrokes.any { it.id == pending.id }) {
+            liveHolder.pendingCommitStroke = null
+            activeDrawTick++
+        }
+    }
+
     val selectedStroke = remember(activeTool, selectedStrokeId, visibleStrokes) {
         if (activeTool == ToolType.SELECT && selectedStrokeId != null) {
             visibleStrokes.find { it.id == selectedStrokeId }
@@ -152,9 +366,8 @@ fun SketchCanvas(
                 .testTag("sketch_canvas")
                 .pointerInput(Unit) {
                     val activePointers = LinkedHashMap<PointerId, SketchPoint>()
-                    var activeStroke: Stroke? = null
                     var isPanning = false
-                    var isPinching = false
+                    var hasPinchedInGesture = false
                     var panStartOrigin = SketchPoint(0f, 0f)
                     var panStartPointer = SketchPoint(0f, 0f)
 
@@ -162,15 +375,17 @@ fun SketchCanvas(
                         if (!currentPressureEnabled) return 0.5f
                         if (rawPressure.isNaN()) return 0.5f
                         if (type == PointerType.Touch && rawPressure == 0f) return 0.5f
-                        if (type == PointerType.Mouse && kotlin.math.abs(rawPressure - 0.5f) < 1e-4f) return 0.5f
+                        if (type == PointerType.Mouse && abs(rawPressure - 0.5f) < 1e-4f) return 0.5f
                         return StrokeMath.clamp(rawPressure, 0.05f, 1f)
                     }
 
                     fun toWorldPoint(pos: Offset, pressure: Float, type: PointerType): SketchPoint {
-                        val safeZoom = if (currentZoom > 0f) currentZoom else 1f
+                        val activePan = if (liveHolder.isGestureNavigating) liveHolder.gesturePan else currentPan
+                        val activeZoom = if (liveHolder.isGestureNavigating) liveHolder.gestureZoom else currentZoom
+                        val safeZoom = if (activeZoom > 0f) activeZoom else 1f
                         return SketchPoint(
-                            x = round(((pos.x - currentPan.x) / safeZoom) * 10f) / 10f,
-                            y = round(((pos.y - currentPan.y) / safeZoom) * 10f) / 10f,
+                            x = round(((pos.x - activePan.x) / safeZoom) * 100f) / 100f,
+                            y = round(((pos.y - activePan.y) / safeZoom) * 100f) / 100f,
                             pressure = extractPressure(pressure, type)
                         )
                     }
@@ -178,9 +393,15 @@ fun SketchCanvas(
                     awaitEachGesture {
                         val firstDown = awaitFirstDown(requireUnconsumed = false)
                         activePointers.clear()
-                        activeStroke = null
+                        liveHolder.activeStroke = null
+                        liveHolder.activePoints.clear()
+                        liveHolder.activeSnapGuides = SnapGuides()
+                        liveHolder.totalMoveDist = 0f
+                        liveHolder.isGestureNavigating = false
+                        liveHolder.gesturePan = currentPan
+                        liveHolder.gestureZoom = currentZoom
                         isPanning = false
-                        isPinching = false
+                        hasPinchedInGesture = false
 
                         activePointers[firstDown.id] = SketchPoint(firstDown.position.x, firstDown.position.y)
 
@@ -205,6 +426,11 @@ fun SketchCanvas(
                             } else {
                                 currentStrokeSize
                             }
+                            val effectiveOpacity = when (currentTool) {
+                                ToolType.ERASER -> 1f
+                                ToolType.HIGHLIGHTER -> StrokeMath.clamp(0.35f * currentBrushOpacity, 0.08f, 0.65f)
+                                else -> StrokeMath.clamp(currentBrushOpacity, 0.1f, 1f)
+                            }
                             val stroke = Stroke(
                                 id = "s_${System.currentTimeMillis()}_${(1000..9999).random()}",
                                 userId = currentLocalUserId,
@@ -212,37 +438,66 @@ fun SketchCanvas(
                                 tool = currentTool,
                                 colorArgb = currentColor,
                                 size = effectiveSize,
-                                opacity = if (currentTool == ToolType.HIGHLIGHTER) 0.35f else 1f,
-                                points = listOf(startPt),
+                                opacity = effectiveOpacity,
+                                points = emptyList(),
                                 symmetry = currentSymmetryMode,
                                 symmetryCenter = if (currentSymmetryMode != SymmetryMode.NONE) currentSymmetryCenter else null,
                                 brush = currentBrush,
                                 pressureSensitive = currentPressureEnabled,
                                 timestamp = System.currentTimeMillis()
                             )
-                            activeStroke = stroke
-                            onStartStroke(stroke)
+                            liveHolder.activePoints.add(startPt)
+                            liveHolder.activeStroke = stroke
+                            activeDrawTick++
                         }
 
                         while (true) {
                             val event = awaitPointerEvent()
                             for (change in event.changes) {
-                                if (change.pressed) {
-                                    if (!activePointers.containsKey(change.id)) {
-                                        activePointers[change.id] = SketchPoint(change.position.x, change.position.y)
-                                    }
+                                if (!change.pressed) {
+                                    activePointers.remove(change.id)
+                                } else if (!activePointers.containsKey(change.id)) {
+                                    activePointers[change.id] = SketchPoint(change.position.x, change.position.y)
                                 }
+                            }
+
+                            if (activePointers.isEmpty()) {
+                                liveHolder.activeStroke?.let { pending ->
+                                    val done = pending.copy(points = liveHolder.activePoints.toList())
+                                    liveHolder.activeStroke = null
+                                    liveHolder.activePoints.clear()
+                                    liveHolder.activeSnapGuides = SnapGuides()
+                                    if (done.points.isNotEmpty()) {
+                                        liveHolder.pendingCommitStroke = done
+                                        onCommitStroke(done)
+                                    }
+                                    activeDrawTick++
+                                }
+                                if (liveHolder.isGestureNavigating) {
+                                    liveHolder.isGestureNavigating = false
+                                    onPanZoom(liveHolder.gesturePan, liveHolder.gestureZoom)
+                                    activeDrawTick++
+                                }
+                                break
                             }
 
                             if (activePointers.size >= 2) {
                                 // Transition cleanly to 2-finger pinch & pan
-                                activeStroke?.let { pending ->
-                                    activeStroke = null
-                                    onSnapGuides(SnapGuides())
-                                    onEndStroke(pending)
+                                liveHolder.activeStroke?.let { pending ->
+                                    val isTinyPinchDot =
+                                        liveHolder.activePoints.size <= 3 && liveHolder.totalMoveDist < 12f
+                                    liveHolder.activeStroke = null
+                                    liveHolder.activeSnapGuides = SnapGuides()
+                                    if (!isTinyPinchDot && liveHolder.activePoints.isNotEmpty()) {
+                                        val done = pending.copy(points = liveHolder.activePoints.toList())
+                                        liveHolder.pendingCommitStroke = done
+                                        onCommitStroke(done)
+                                    }
+                                    liveHolder.activePoints.clear()
                                 }
+                                hasPinchedInGesture = true
                                 isPanning = false
-                                isPinching = true
+                                liveHolder.isGestureNavigating = true
 
                                 val entries = activePointers.entries.toList()
                                 val id1 = entries[0].key
@@ -263,26 +518,31 @@ fun SketchCanvas(
                                     p2Prev = p2Prev,
                                     p1Next = p1Next,
                                     p2Next = p2Next,
-                                    currentPan = currentPan,
-                                    currentZoom = currentZoom
+                                    currentPan = liveHolder.gesturePan,
+                                    currentZoom = liveHolder.gestureZoom
                                 )
+                                liveHolder.gesturePan = nextTransform.pan
+                                liveHolder.gestureZoom = nextTransform.zoom
+                                activeDrawTick++
                                 onPanZoom(nextTransform.pan, nextTransform.zoom)
                                 event.changes.forEach { it.consume() }
-                            } else if (!isPinching) {
-                                val primary = event.changes.firstOrNull()
-                                if (primary != null && primary.pressed) {
+                            } else if (!hasPinchedInGesture) {
+                                val primary = event.changes.firstOrNull { it.pressed }
+                                if (primary != null) {
                                     activePointers[primary.id] = SketchPoint(primary.position.x, primary.position.y)
                                     if (isPanning) {
                                         val dx = primary.position.x - panStartPointer.x
                                         val dy = primary.position.y - panStartPointer.y
-                                        onPanZoom(
-                                            SketchPoint(panStartOrigin.x + dx, panStartOrigin.y + dy),
-                                            currentZoom
-                                        )
+                                        val nextPan = SketchPoint(panStartOrigin.x + dx, panStartOrigin.y + dy)
+                                        liveHolder.isGestureNavigating = true
+                                        liveHolder.gesturePan = nextPan
+                                        liveHolder.gestureZoom = currentZoom
+                                        activeDrawTick++
+                                        onPanZoom(nextPan, currentZoom)
                                         primary.consume()
                                     } else {
-                                        val current = activeStroke
-                                        if (current != null) {
+                                        val current = liveHolder.activeStroke
+                                        if (current != null && liveHolder.activePoints.isNotEmpty()) {
                                             val pt = toWorldPoint(primary.position, primary.pressure, primary.type)
                                             when (current.tool) {
                                                 ToolType.RECT, ToolType.CIRCLE -> {
@@ -291,90 +551,151 @@ fun SketchCanvas(
                                                         currentStrokes,
                                                         excludeStrokeId = current.id
                                                     )
-                                                    onSnapGuides(snapped.guides)
-                                                    val updated = current.copy(points = listOf(current.points.first(), snapped.point))
-                                                    activeStroke = updated
-                                                    onEndStroke(updated)
+                                                    val start = liveHolder.activePoints[0]
+                                                    liveHolder.totalMoveDist = StrokeMath.distance(start, snapped.point)
+                                                    liveHolder.activeSnapGuides = snapped.guides
+                                                    liveHolder.activePoints.clear()
+                                                    liveHolder.activePoints.add(start)
+                                                    liveHolder.activePoints.add(snapped.point)
+                                                    activeDrawTick++
                                                 }
                                                 ToolType.LINE -> {
-                                                    val updated = current.copy(points = listOf(current.points.first(), pt))
-                                                    activeStroke = updated
-                                                    onEndStroke(updated)
+                                                    val start = liveHolder.activePoints[0]
+                                                    liveHolder.totalMoveDist = StrokeMath.distance(start, pt)
+                                                    liveHolder.activePoints.clear()
+                                                    liveHolder.activePoints.add(start)
+                                                    liveHolder.activePoints.add(pt)
+                                                    activeDrawTick++
                                                 }
                                                 else -> {
-                                                    val ptsToAdd = mutableListOf<SketchPoint>()
-                                                    for (hist in primary.historical) {
-                                                        ptsToAdd.add(toWorldPoint(hist.position, primary.pressure, primary.type))
-                                                    }
-                                                    ptsToAdd.add(pt)
-
-                                                    val stabilizedBatch = ArrayList<SketchPoint>(ptsToAdd.size)
-                                                    val mutableList = current.points.toMutableList()
-                                                    for (samplePt in ptsToAdd) {
-                                                        val prevPt = mutableList.lastOrNull()
-                                                        val nextPt = if (prevPt != null) {
-                                                            StrokeMath.stabilizePoint(prevPt, samplePt, currentStabilization)
-                                                        } else {
-                                                            samplePt
+                                                    var addedAny = false
+                                                    val histList = primary.historical
+                                                    for (hIdx in histList.indices) {
+                                                        val histPt = toWorldPoint(
+                                                            histList[hIdx].position,
+                                                            primary.pressure,
+                                                            primary.type
+                                                        )
+                                                        val prevPt = liveHolder.activePoints.last()
+                                                        val nextPt = StrokeMath.stabilizePoint(
+                                                            prevPt,
+                                                            histPt,
+                                                            currentStabilization
+                                                        )
+                                                        if (prevPt.x != nextPt.x || prevPt.y != nextPt.y) {
+                                                            liveHolder.totalMoveDist += StrokeMath.distance(prevPt, nextPt)
+                                                            liveHolder.activePoints.add(nextPt)
+                                                            addedAny = true
                                                         }
-                                                        val last = mutableList.lastOrNull()
-                                                        if (last == null || last.x != nextPt.x || last.y != nextPt.y) {
-                                                            mutableList.add(nextPt)
-                                                            stabilizedBatch.add(nextPt)
-                                                        }
                                                     }
-                                                    if (stabilizedBatch.isNotEmpty()) {
-                                                        onAppendPoints(current.id, stabilizedBatch)
+                                                    val prevPt = liveHolder.activePoints.last()
+                                                    val nextPt = StrokeMath.stabilizePoint(
+                                                        prevPt,
+                                                        pt,
+                                                        currentStabilization
+                                                    )
+                                                    if (prevPt.x != nextPt.x || prevPt.y != nextPt.y) {
+                                                        liveHolder.totalMoveDist += StrokeMath.distance(prevPt, nextPt)
+                                                        liveHolder.activePoints.add(nextPt)
+                                                        addedAny = true
                                                     }
-                                                    activeStroke = current.copy(points = mutableList)
+                                                    if (addedAny) {
+                                                        activeDrawTick++
+                                                    }
                                                 }
                                             }
                                             primary.consume()
                                         }
                                     }
                                 }
-                            }
-
-                            for (change in event.changes) {
-                                if (!change.pressed) {
-                                    activePointers.remove(change.id)
+                            } else {
+                                // After pinching with 2 fingers, keep position updated for remaining finger without stray marks
+                                for (change in event.changes) {
+                                    if (change.pressed) {
+                                        activePointers[change.id] = SketchPoint(change.position.x, change.position.y)
+                                        change.consume()
+                                    }
                                 }
-                            }
-                            if (activePointers.size < 2) {
-                                isPinching = false
-                            }
-                            if (activePointers.isEmpty()) {
-                                activeStroke?.let { done ->
-                                    activeStroke = null
-                                    onSnapGuides(SnapGuides())
-                                    onEndStroke(done)
-                                }
-                                break
                             }
                         }
                     }
                 }
         ) {
-            // 1. Dot Grid
+            // Reading activeDrawTick ensures only DrawScope invalidates during active drawing/pinching (0 Compose recompositions)
+            @Suppress("UNUSED_VARIABLE")
+            val tick = activeDrawTick
+
+            val activePan = if (liveHolder.isGestureNavigating) liveHolder.gesturePan else pan
+            val activeZoom = if (liveHolder.isGestureNavigating) liveHolder.gestureZoom else zoom
+
+            // 1. Batched Dot Grid (single drawPoints call)
             if (showGrid) {
-                drawDotGrid(pan = pan, zoom = zoom)
+                drawDotGrid(pan = activePan, zoom = activeZoom, buffer = dotGridBuffer)
             }
 
-            // 2. Strokes inside offscreen saveLayer so Eraser DST_OUT preserves paper & grid
+            // 2. Baked offscreen committed strokes + live active stroke
+            val wPx = size.width.roundToInt()
+            val hPx = size.height.roundToInt()
             val nc = drawContext.canvas.nativeCanvas
-            val layerSave = nc.saveLayer(0f, 0f, size.width, size.height, null)
-            nc.save()
-            nc.translate(pan.x, pan.y)
-            nc.scale(zoom, zoom)
-            for (stroke in visibleStrokes) {
-                BrushEngine.renderBrushStrokeToCanvas(nc, stroke, symmetryCenter)
-            }
-            nc.restore()
-            nc.restoreToCount(layerSave)
 
-            // 3. Subtle Paper Grain overlay
+            val pendingCommit = liveHolder.pendingCommitStroke
+                ?.takeIf { p -> visibleStrokes.none { it.id == p.id } }
+            val activeStroke = liveHolder.activeStroke
+            val activeRenderStroke = if (activeStroke != null && liveHolder.activePoints.isNotEmpty()) {
+                activeStroke.copy(points = liveHolder.activePoints)
+            } else {
+                null
+            }
+
+            val needsEraserLayer = activeRenderStroke?.tool == ToolType.ERASER ||
+                pendingCommit?.tool == ToolType.ERASER
+
+            val layerSave = if (needsEraserLayer) {
+                nc.saveLayer(0f, 0f, size.width, size.height, null)
+            } else {
+                -1
+            }
+
+            val drewLivePreview = if (liveHolder.isGestureNavigating) {
+                committedCache.drawTransformedPreview(nc, activePan, activeZoom)
+            } else {
+                false
+            }
+            if (!drewLivePreview) {
+                val bakedBitmap = committedCache.ensureAndBake(
+                    width = wPx,
+                    height = hPx,
+                    visibleStrokes = visibleStrokes,
+                    pan = activePan,
+                    zoom = activeZoom,
+                    symmetryCenter = symmetryCenter
+                )
+                if (bakedBitmap != null) {
+                    nc.drawBitmap(bakedBitmap, 0f, 0f, null)
+                }
+            }
+
+            if (pendingCommit != null || activeRenderStroke != null) {
+                nc.save()
+                nc.translate(activePan.x, activePan.y)
+                nc.scale(activeZoom, activeZoom)
+                if (pendingCommit != null) {
+                    BrushEngine.renderBrushStrokeToCanvas(nc, pendingCommit, symmetryCenter)
+                }
+                if (activeRenderStroke != null) {
+                    BrushEngine.renderBrushStrokeToCanvas(nc, activeRenderStroke, symmetryCenter)
+                }
+                nc.restore()
+            }
+
+            if (layerSave >= 0) {
+                nc.restoreToCount(layerSave)
+            }
+
+            // 3. Cached tiled Paper Grain overlay (single drawRect call)
             if (showPaperGrain) {
-                drawPaperGrain()
+                val grainPaint = paperGrainCache.getPaint(18.dp.toPx(), VellumColors.InkCharcoal.toArgb())
+                nc.drawRect(0f, 0f, size.width, size.height, grainPaint)
             }
 
             // 4. Symmetry Axes & Guides
@@ -383,14 +704,15 @@ fun SketchCanvas(
                     symmetryMode = symmetryMode,
                     symmetryCenter = symmetryCenter,
                     guideMode = guideMode,
-                    pan = pan,
-                    zoom = zoom
+                    pan = activePan,
+                    zoom = activeZoom
                 )
             }
 
-            // 5. Alignment Snapping Guides
-            snapGuides.x?.let { gx ->
-                val sx = gx * zoom + pan.x
+            // 5. Alignment Snapping Guides (local to active drag)
+            val guides = liveHolder.activeSnapGuides
+            guides.x?.let { gx ->
+                val sx = gx * activeZoom + activePan.x
                 drawLine(
                     color = VellumColors.CobaltBlue.copy(alpha = 0.6f),
                     start = Offset(sx, 0f),
@@ -398,8 +720,8 @@ fun SketchCanvas(
                     strokeWidth = 1.dp.toPx()
                 )
             }
-            snapGuides.y?.let { gy ->
-                val sy = gy * zoom + pan.y
+            guides.y?.let { gy ->
+                val sy = gy * activeZoom + activePan.y
                 drawLine(
                     color = VellumColors.CobaltBlue.copy(alpha = 0.6f),
                     start = Offset(0f, sy),
@@ -483,7 +805,19 @@ fun SketchCanvas(
                                     currentZoom
                                 )
                                 val rot = StrokeMath.calculateRotationAngle(b.cx, b.cy, worldPtr)
-                                onEndStroke(s.copy(rotation = rot))
+                                onUpdateStrokePreview(s.copy(rotation = rot))
+                            },
+                            onDragEnd = {
+                                val s = currentStrokes.find { it.id == selectedStroke.id }
+                                if (s != null) {
+                                    onCommitStroke(s)
+                                }
+                            },
+                            onDragCancel = {
+                                val s = currentStrokes.find { it.id == selectedStroke.id }
+                                if (s != null) {
+                                    onCommitStroke(s)
+                                }
                             }
                         )
                     }
@@ -521,48 +855,53 @@ fun SketchCanvas(
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
             )
+        } else if (abs(zoom - 1f) > 0.01f || abs(pan.x) > 4f || abs(pan.y) > 4f) {
+            TabletZoomHud(
+                zoom = zoom,
+                onZoomOut = { onZoomStep(-0.25f) },
+                onResetView = onResetView,
+                onZoomIn = { onZoomStep(0.25f) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(12.dp)
+                    .testTag("compact_zoom_hud")
+            )
         }
     }
 }
 
-private fun DrawScope.drawDotGrid(pan: SketchPoint, zoom: Float) {
+private fun DrawScope.drawDotGrid(pan: SketchPoint, zoom: Float, buffer: DotGridBuffer) {
     val step = 24f * zoom
     if (step < 6f) return
     val startX = ((pan.x % step) + step) % step
     val startY = ((pan.y % step) + step) % step
     val radius = 1f.coerceAtLeast(0.8f * zoom.coerceAtMost(1.4f))
 
+    val cols = ceil(((size.width - startX) / step).toDouble()).toInt().coerceAtLeast(0) + 1
+    val rows = ceil(((size.height - startY) / step).toDouble()).toInt().coerceAtLeast(0) + 1
+    val needed = cols * rows * 2
+    if (needed <= 0) return
+
+    if (buffer.points.size < needed) {
+        buffer.points = FloatArray(needed)
+    }
+    val pts = buffer.points
+    var idx = 0
     var y = startY
     while (y < size.height) {
         var x = startX
         while (x < size.width) {
-            drawCircle(
-                color = VellumColors.GridDot,
-                radius = radius,
-                center = Offset(x, y)
-            )
+            if (idx + 1 >= pts.size) break
+            pts[idx++] = x
+            pts[idx++] = y
             x += step
         }
         y += step
     }
-}
-
-private fun DrawScope.drawPaperGrain() {
-    val step = 18.dp.toPx()
-    var y = 0f
-    var row = 0
-    while (y < size.height) {
-        var x = if (row % 2 == 0) 0f else step / 2f
-        while (x < size.width) {
-            drawCircle(
-                color = VellumColors.InkCharcoal.copy(alpha = 0.03f),
-                radius = 0.7f,
-                center = Offset(x, y)
-            )
-            x += step
-        }
-        y += step
-        row++
+    if (idx >= 2) {
+        buffer.paint.color = VellumColors.GridDot.toArgb()
+        buffer.paint.strokeWidth = radius * 2f
+        drawContext.canvas.nativeCanvas.drawPoints(pts, 0, idx, buffer.paint)
     }
 }
 

@@ -18,7 +18,7 @@ object TouchMath {
         currentPan: SketchPoint,
         currentZoom: Float,
         minZoom: Float = 0.25f,
-        maxZoom: Float = 4f
+        maxZoom: Float = 8f
     ): PinchTransformResult {
         val prevDist = hypot((p2Prev.x - p1Prev.x).toDouble(), (p2Prev.y - p1Prev.y).toDouble()).toFloat()
         val nextDist = hypot((p2Next.x - p1Next.x).toDouble(), (p2Next.y - p1Next.y).toDouble()).toFloat()

@@ -35,6 +35,8 @@ fun BrushPreviewCanvas(
     colorArgb: Int,
     width: Dp = 44.dp,
     height: Dp = 20.dp,
+    strokeSize: Float = 4f,
+    opacity: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier.size(width, height)) {
@@ -48,7 +50,9 @@ fun BrushPreviewCanvas(
                 brushId = brushId,
                 width = width.value,
                 height = height.value,
-                colorArgb = colorArgb
+                colorArgb = colorArgb,
+                strokeSize = strokeSize,
+                opacity = opacity
             )
             nativeCanvas.restore()
         }

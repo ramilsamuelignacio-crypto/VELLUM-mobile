@@ -44,7 +44,9 @@ data class StudioUiState(
     val roomId: String = "studio-1",
     val activeTool: ToolType = ToolType.PEN,
     val colorArgb: Int = VellumColors.Swatches.first(),
+    val customColors: List<Int> = emptyList(),
     val strokeSize: Float = 4f,
+    val brushOpacity: Float = 1f,
     val stabilization: Float = 0.5f,
     val pressureEnabled: Boolean = true,
     val activeBrush: String = BrushKind.HARD_ROUND.id,
@@ -54,6 +56,7 @@ data class StudioUiState(
     val showStartupSplash: Boolean = true,
     val showTutorial: Boolean = true,
     val showRoomModal: Boolean = false,
+    val showBrushSettingsMenu: Boolean = false,
     val showCustomColorDialog: Boolean = false,
     val zoom: Float = 1f,
     val pan: SketchPoint = SketchPoint(0f, 0f),
@@ -80,7 +83,9 @@ private data class LocalStudioControls(
     val roomId: String = "studio-1",
     val activeTool: ToolType = ToolType.PEN,
     val colorArgb: Int = VellumColors.Swatches.first(),
+    val customColors: List<Int> = emptyList(),
     val strokeSize: Float = 4f,
+    val brushOpacity: Float = 1f,
     val stabilization: Float = 0.5f,
     val pressureEnabled: Boolean = true,
     val activeBrush: String = BrushKind.HARD_ROUND.id,
@@ -90,6 +95,7 @@ private data class LocalStudioControls(
     val showStartupSplash: Boolean = true,
     val showTutorial: Boolean = true,
     val showRoomModal: Boolean = false,
+    val showBrushSettingsMenu: Boolean = false,
     val showCustomColorDialog: Boolean = false,
     val zoom: Float = 1f,
     val pan: SketchPoint = SketchPoint(0f, 0f),
@@ -132,7 +138,9 @@ class SketchViewModel(application: Application) : AndroidViewModel(application) 
             roomId = ctrl.roomId,
             activeTool = ctrl.activeTool,
             colorArgb = ctrl.colorArgb,
+            customColors = ctrl.customColors,
             strokeSize = ctrl.strokeSize,
+            brushOpacity = ctrl.brushOpacity,
             stabilization = ctrl.stabilization,
             pressureEnabled = ctrl.pressureEnabled,
             activeBrush = ctrl.activeBrush,
@@ -142,6 +150,7 @@ class SketchViewModel(application: Application) : AndroidViewModel(application) 
             showStartupSplash = ctrl.showStartupSplash,
             showTutorial = ctrl.showTutorial,
             showRoomModal = ctrl.showRoomModal,
+            showBrushSettingsMenu = ctrl.showBrushSettingsMenu,
             showCustomColorDialog = ctrl.showCustomColorDialog,
             zoom = ctrl.zoom,
             pan = ctrl.pan,
@@ -184,6 +193,10 @@ class SketchViewModel(application: Application) : AndroidViewModel(application) 
         controls.update { it.copy(showRoomModal = show) }
     }
 
+    fun setShowBrushSettingsMenu(show: Boolean) {
+        controls.update { it.copy(showBrushSettingsMenu = show) }
+    }
+
     fun setShowCustomColorDialog(show: Boolean) {
         controls.update { it.copy(showCustomColorDialog = show) }
     }
@@ -200,8 +213,15 @@ class SketchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectColor(colorArgb: Int) {
         controls.update {
+            val isBuiltIn = VellumColors.ExtendedPalette.contains(colorArgb)
+            val nextCustom = if (isBuiltIn) {
+                it.customColors
+            } else {
+                (listOf(colorArgb) + it.customColors.filterNot { existing -> existing == colorArgb }).take(6)
+            }
             it.copy(
                 colorArgb = colorArgb,
+                customColors = nextCustom,
                 activeTool = if (it.activeTool == ToolType.ERASER) ToolType.PEN else it.activeTool,
                 touchPanMode = false
             )
@@ -209,7 +229,11 @@ class SketchViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setStrokeSize(size: Float) {
-        controls.update { it.copy(strokeSize = StrokeMath.clamp(size, 1f, 32f)) }
+        controls.update { it.copy(strokeSize = StrokeMath.clamp(size, 1f, 48f)) }
+    }
+
+    fun setBrushOpacity(opacity: Float) {
+        controls.update { it.copy(brushOpacity = StrokeMath.clamp(opacity, 0.1f, 1f)) }
     }
 
     fun setStabilization(value: Float) {
@@ -313,13 +337,13 @@ class SketchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setPanAndZoom(pan: SketchPoint, zoom: Float) {
         controls.update {
-            it.copy(pan = pan, zoom = StrokeMath.clamp(zoom, 0.25f, 4f))
+            it.copy(pan = pan, zoom = StrokeMath.clamp(zoom, 0.25f, 8f))
         }
     }
 
     fun zoomStep(delta: Float) {
         controls.update {
-            val nextZoom = StrokeMath.clamp(round((it.zoom + delta) * 100f) / 100f, 0.25f, 4f)
+            val nextZoom = StrokeMath.clamp(round((it.zoom + delta) * 100f) / 100f, 0.25f, 8f)
             if (nextZoom == it.zoom) return@update it
             val focalX = it.canvasWidth / 2f
             val focalY = it.canvasHeight / 2f
@@ -357,6 +381,14 @@ class SketchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun moveLayer(fromIndex: Int, toIndex: Int) {
         repository.moveLayer(fromIndex, toIndex)
+    }
+
+    fun commitStroke(stroke: Stroke) {
+        repository.commitStroke(stroke)
+    }
+
+    fun updateStrokePreview(stroke: Stroke) {
+        repository.updateStrokeInMemory(stroke)
     }
 
     fun startStroke(stroke: Stroke) {

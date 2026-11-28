@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
@@ -56,6 +58,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -79,10 +82,14 @@ fun TouchBottomSheet(
     activeTool: ToolType,
     onSelectTool: (ToolType) -> Unit,
     colorArgb: Int,
+    customColors: List<Int>,
     onSelectColor: (Int) -> Unit,
     onOpenCustomColor: () -> Unit,
     strokeSize: Float,
     onChangeSize: (Float) -> Unit,
+    brushOpacity: Float,
+    onChangeOpacity: (Float) -> Unit,
+    onOpenBrushSettings: () -> Unit,
     stabilization: Float,
     onChangeStabilization: (Float) -> Unit,
     pressureEnabled: Boolean,
@@ -259,79 +266,146 @@ fun TouchBottomSheet(
                                         }
                                     }
 
-                                    // Brush Engine 3-col
+                                    // Brush Engine 3-col grid
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        SheetSectionLabel("Brush Engine")
+                                        val activeKind = BrushKind.fromId(activeBrush)
                                         Row(
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            BrushKind.entries.forEach { brush ->
-                                                val isActive = activeBrush == brush.id
-                                                Column(
-                                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                                    verticalArrangement = Arrangement.Center,
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .heightIn(min = 58.dp)
-                                                        .clip(RoundedCornerShape(12.dp))
-                                                        .background(if (isActive) VellumColors.InkCharcoal else VellumColors.PaperWhite)
-                                                        .border(
-                                                            1.dp,
-                                                            if (isActive) VellumColors.InkCharcoal else VellumColors.HairlineBorder,
-                                                            RoundedCornerShape(12.dp)
+                                            SheetSectionLabel("Brush Engine")
+                                            Text(
+                                                text = activeKind.description,
+                                                fontSize = 11.sp,
+                                                color = VellumColors.SlateSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        BrushKind.entries.chunked(3).forEach { rowBrushes ->
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                rowBrushes.forEach { brush ->
+                                                    val isActive = activeBrush == brush.id
+                                                    val previewInk = when {
+                                                        isActive -> android.graphics.Color.WHITE
+                                                        Color(colorArgb).luminance() > 0.85f -> 0xFF18181B.toInt()
+                                                        else -> colorArgb
+                                                    }
+                                                    Column(
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        verticalArrangement = Arrangement.Center,
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .heightIn(min = 58.dp)
+                                                            .clip(RoundedCornerShape(12.dp))
+                                                            .background(if (isActive) VellumColors.InkCharcoal else VellumColors.PaperWhite)
+                                                            .border(
+                                                                1.dp,
+                                                                if (isActive) VellumColors.InkCharcoal else VellumColors.HairlineBorder,
+                                                                RoundedCornerShape(12.dp)
+                                                            )
+                                                            .clickable { onSelectBrush(brush.id) }
+                                                            .padding(horizontal = 6.dp, vertical = 8.dp)
+                                                            .testTag("sheet_brush_${brush.id}")
+                                                    ) {
+                                                        BrushPreviewCanvas(
+                                                            brushId = brush.id,
+                                                            colorArgb = previewInk,
+                                                            width = 48.dp,
+                                                            height = 22.dp
                                                         )
-                                                        .clickable { onSelectBrush(brush.id) }
-                                                        .padding(8.dp)
-                                                        .testTag("sheet_brush_${brush.id}")
-                                                ) {
-                                                    BrushPreviewCanvas(
-                                                        brushId = brush.id,
-                                                        colorArgb = if (isActive) android.graphics.Color.WHITE else colorArgb,
-                                                        width = 48.dp,
-                                                        height = 22.dp
-                                                    )
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Text(
-                                                        text = brush.label,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                        color = if (isActive) Color.White else VellumColors.InkCharcoal,
-                                                        maxLines = 1
-                                                    )
+                                                        Spacer(modifier = Modifier.height(4.dp))
+                                                        Text(
+                                                            text = brush.label,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Medium,
+                                                            color = if (isActive) Color.White else VellumColors.InkCharcoal,
+                                                            maxLines = 1
+                                                        )
+                                                    }
+                                                }
+                                                repeat(3 - rowBrushes.size) {
+                                                    Spacer(modifier = Modifier.weight(1f))
                                                 }
                                             }
                                         }
                                     }
 
-                                    // Ink Color Swatches
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        SheetSectionLabel("Ink Color")
+                                    // Ink Color Palette
+                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            SheetSectionLabel("Color Palette")
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(VellumColors.CobaltTint)
+                                                    .border(1.dp, VellumColors.CobaltBorder, RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        onClose()
+                                                        onOpenBrushSettings()
+                                                    }
+                                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                                    .testTag("sheet_open_brush_menu")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Tune,
+                                                    contentDescription = "Open Brush Studio",
+                                                    tint = VellumColors.CobaltBlue,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Text(
+                                                    text = "Brush Menu",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = VellumColors.CobaltBlue
+                                                )
+                                            }
+                                        }
                                         FlowRow(
                                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                                             verticalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            VellumColors.Swatches.forEach { swatch ->
+                                            (customColors + VellumColors.ExtendedPalette).distinct().forEach { swatch ->
                                                 val isSelected = colorArgb == swatch && activeTool != ToolType.ERASER
+                                                val swatchColor = Color(swatch)
+                                                val checkTint = if (swatchColor.luminance() > 0.65f) VellumColors.InkCharcoal else Color.White
                                                 Box(
+                                                    contentAlignment = Alignment.Center,
                                                     modifier = Modifier
-                                                        .size(44.dp)
+                                                        .size(40.dp)
                                                         .clip(CircleShape)
-                                                        .background(Color(swatch))
-                                                        .then(
-                                                            if (isSelected) {
-                                                                Modifier.border(3.dp, VellumColors.CobaltBlue, CircleShape)
-                                                            } else {
-                                                                Modifier
-                                                            }
+                                                        .background(swatchColor)
+                                                        .border(
+                                                            width = if (isSelected) 3.dp else 1.dp,
+                                                            color = if (isSelected) VellumColors.CobaltBlue else VellumColors.HairlineBorder,
+                                                            shape = CircleShape
                                                         )
                                                         .clickable { onSelectColor(swatch) }
                                                         .testTag("sheet_swatch_$swatch")
-                                                )
+                                                ) {
+                                                    if (isSelected) {
+                                                        Icon(
+                                                            imageVector = Icons.Filled.Check,
+                                                            contentDescription = "Selected color",
+                                                            tint = checkTint,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
                                             Box(
                                                 modifier = Modifier
-                                                    .size(44.dp)
+                                                    .size(40.dp)
                                                     .clip(CircleShape)
                                                     .background(
                                                         Brush.sweepGradient(
@@ -365,11 +439,31 @@ fun TouchBottomSheet(
                                             Slider(
                                                 value = strokeSize,
                                                 onValueChange = onChangeSize,
-                                                valueRange = 1f..32f,
+                                                valueRange = 1f..48f,
                                                 colors = SliderDefaults.colors(
                                                     thumbColor = VellumColors.CobaltBlue,
                                                     activeTrackColor = VellumColors.CobaltBlue
-                                                )
+                                                ),
+                                                modifier = Modifier.testTag("sheet_size_slider")
+                                            )
+                                        }
+                                        Column {
+                                            Row(
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Text("Opacity", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = VellumColors.InkCharcoal)
+                                                Text("${(brushOpacity * 100f).roundToInt()}%", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = VellumColors.SlateSecondary)
+                                            }
+                                            Slider(
+                                                value = brushOpacity * 100f,
+                                                onValueChange = { onChangeOpacity(it / 100f) },
+                                                valueRange = 10f..100f,
+                                                colors = SliderDefaults.colors(
+                                                    thumbColor = VellumColors.CobaltBlue,
+                                                    activeTrackColor = VellumColors.CobaltBlue
+                                                ),
+                                                modifier = Modifier.testTag("sheet_opacity_slider")
                                             )
                                         }
                                         Column {

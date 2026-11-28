@@ -48,6 +48,18 @@ class SketchRepository(context: Context) {
         }
     }
 
+    fun commitStroke(stroke: Stroke) {
+        val roomId = currentRoomId
+        _strokes.update { StrokeMath.addStrokeIdempotent(it, stroke) }
+        scope.launch {
+            dbHelper.upsertStroke(roomId, stroke)
+        }
+    }
+
+    fun updateStrokeInMemory(stroke: Stroke) {
+        _strokes.update { StrokeMath.addStrokeIdempotent(it, stroke) }
+    }
+
     fun startStroke(stroke: Stroke) {
         val roomId = currentRoomId
         _strokes.update { StrokeMath.addStrokeIdempotent(it, stroke) }
@@ -62,11 +74,7 @@ class SketchRepository(context: Context) {
     }
 
     fun endStroke(stroke: Stroke) {
-        val roomId = currentRoomId
-        _strokes.update { StrokeMath.addStrokeIdempotent(it, stroke) }
-        scope.launch {
-            dbHelper.upsertStroke(roomId, stroke)
-        }
+        commitStroke(stroke)
     }
 
     fun undoStroke(strokeId: String) {
